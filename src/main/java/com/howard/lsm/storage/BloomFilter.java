@@ -25,6 +25,15 @@ public class BloomFilter {
     }
 
     /**
+     * 从已存在的位数组构造布隆过滤器
+     */
+    public BloomFilter(int bitSetSize, int numHashFunctions, byte[] bitArray) {
+        this.bitSetSize = bitSetSize;
+        this.numHashFunctions = numHashFunctions;
+        this.bitSet = BitSet.valueOf(bitArray);
+    }
+
+    /**
      * 添加键到过滤器
      */
     public void add(String key) {
