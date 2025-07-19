@@ -119,13 +119,6 @@ public class Block {
     }
 
     /**
-     * 返回块中所有键值对的只读视图
-     */
-    public java.util.Set<Map.Entry<String, byte[]>> entrySet() {
-        return java.util.Collections.unmodifiableSet(data.entrySet());
-    }
-
-    /**
      * 获取块大小
      */
     public long getSize() {
