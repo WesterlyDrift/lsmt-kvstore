@@ -3,6 +3,7 @@ package com.howard.lsm.core;
 import com.howard.lsm.storage.Block;
 import com.howard.lsm.storage.BloomFilter;
 import com.howard.lsm.serialization.BinaryDecoder;
+import com.howard.lsm.serialization.BinaryEncoder;
 import lombok.Getter;
 
 import java.io.IOException;
@@ -54,6 +55,7 @@ public class SSTable {
     // 文件通道，用于读取数据
     private FileChannel fileChannel;
     private final BinaryDecoder decoder;
+    private final BinaryEncoder encoder;
 
     /**
      * 构造函数：创建新的SSTable
@@ -63,6 +65,7 @@ public class SSTable {
         this.blocks = new ArrayList<>(blocks);
         this.bloomFilter = bloomFilter;
         this.decoder = new BinaryDecoder();
+        this.encoder = new BinaryEncoder();
         this.level = 0; // 新创建的SSTable默认在Level 0
 
         // 计算文件大小和键范围
@@ -81,13 +84,13 @@ public class SSTable {
         this.filePath = filePath;
         this.level = level;
         this.decoder = new BinaryDecoder();
+        this.encoder = new BinaryEncoder();
         this.blocks = new ArrayList<>();
 
-        // 从文件读取数据
+        // 从文件读取数据和布隆过滤器
         loadFromFile();
 
         // 重新计算属性
-        this.bloomFilter = loadBloomFilter();
         this.fileSize = filePath.toFile().length();
         this.minKey = calculateMinKey();
         this.maxKey = calculateMaxKey();
@@ -163,11 +166,11 @@ public class SSTable {
                 block.writeTo(channel);
             }
 
-            // 写入布隆过滤器
-            writeBloomFilter(channel);
+            // 写入布隆过滤器并获取长度
+            int bloomLength = writeBloomFilter(channel);
 
             // 写入元数据
-            writeMetadata(channel);
+            writeMetadata(channel, bloomLength);
         }
     }
 
@@ -175,30 +178,69 @@ public class SSTable {
      * 从文件加载
      */
     private void loadFromFile() throws IOException {
-        // 实现从文件加载SSTable的逻辑
-        // 这里简化实现，实际中需要解析文件格式
+        this.fileChannel = FileChannel.open(filePath, StandardOpenOption.READ);
+        long size = fileChannel.size();
+
+        // 读取元数据
+        ByteBuffer metaBuf = ByteBuffer.allocate(8);
+        fileChannel.position(size - 8);
+        fileChannel.read(metaBuf);
+        metaBuf.flip();
+        int blockCount = metaBuf.getInt();
+        int bloomLength = metaBuf.getInt();
+
+        long bloomStart = size - 8L - bloomLength;
+
+        // 读取数据块
+        fileChannel.position(0);
+        for (int i = 0; i < blockCount; i++) {
+            ByteBuffer lenBuf = ByteBuffer.allocate(4);
+            fileChannel.read(lenBuf);
+            lenBuf.flip();
+            int blockSize = lenBuf.getInt();
+
+            ByteBuffer dataBuf = ByteBuffer.allocate(blockSize);
+            fileChannel.read(dataBuf);
+            dataBuf.flip();
+            byte[] blockBytes = new byte[blockSize];
+            dataBuf.get(blockBytes);
+            blocks.add(new Block(blockBytes));
+        }
+
+        // 读取布隆过滤器
+        ByteBuffer bloomBuf = ByteBuffer.allocate(bloomLength);
+        fileChannel.position(bloomStart);
+        fileChannel.read(bloomBuf);
+        bloomBuf.flip();
+        byte[] bloomBytes = new byte[bloomLength];
+        bloomBuf.get(bloomBytes);
+        BinaryDecoder.BloomFilterData bfData = decoder.decodeBloomFilter(bloomBytes);
+        this.bloomFilter = new BloomFilter(bfData.getBitSetSize(), bfData.getNumHashFunctions(), bfData.getBitArray());
     }
 
     /**
      * 写入布隆过滤器
      */
-    private void writeBloomFilter(FileChannel channel) throws IOException {
-        // 实现布隆过滤器的序列化
-    }
-
-    /**
-     * 加载布隆过滤器
-     */
-    private BloomFilter loadBloomFilter() throws IOException {
-        // 实现布隆过滤器的反序列化
-        return new BloomFilter(1000, 0.01); // 临时实现
+    private int writeBloomFilter(FileChannel channel) throws IOException {
+        byte[] data = encoder.encodeBloomFilter(bloomFilter);
+        ByteBuffer buf = ByteBuffer.wrap(data);
+        while (buf.hasRemaining()) {
+            channel.write(buf);
+        }
+        return data.length;
     }
 
     /**
      * 写入元数据
      */
-    private void writeMetadata(FileChannel channel) throws IOException {
-        // 写入SSTable的元数据信息
+    private void writeMetadata(FileChannel channel, int bloomLength) throws IOException {
+        ByteBuffer meta = ByteBuffer.allocate(8);
+        meta.putInt(blocks.size());
+        meta.putInt(bloomLength);
+        meta.flip();
+        while (meta.hasRemaining()) {
+            channel.write(meta);
+        }
     }
 
     /**
@@ -223,6 +265,17 @@ public class SSTable {
     private long calculateMaxKey() {
         return blocks.isEmpty() ? 0 :
                 blocks.get(blocks.size() - 1).getMaxKey().hashCode();
+    }
+
+    /**
+     * 扫描SSTable中的所有键值对
+     */
+    public java.util.List<java.util.Map.Entry<String, byte[]>> scanAll() {
+        java.util.List<java.util.Map.Entry<String, byte[]>> all = new java.util.ArrayList<>();
+        for (Block b : blocks) {
+            all.addAll(b.entrySet());
+        }
+        return all;
     }
 
     /**
