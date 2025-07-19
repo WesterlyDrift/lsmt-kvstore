@@ -9,11 +9,11 @@ import lombok.Data;
 @Data
 public class LSMConfig {
     // 存储配置
-    private String dataDirectory = "/tmp/lsm-data";
-    private String walDirectory = "/tmp/lsm-wal";
+    private String dataDirectory = "./data/lsm-data";
+    private String walDirectory = "./data/lsm-wal";
 
     // 内存表配置
-    private long memTableSize = 64 * 1024 * 1024; // 64MB
+    private long memTableSize = 2 * 1024 * 1024; // 2MB
 
     // 块配置
     private int blockSize = 4096; // 4KB
